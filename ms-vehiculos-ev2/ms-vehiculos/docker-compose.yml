@@ -1,0 +1,49 @@
+# =========================================================
+#  Orquestación: MySQL + ms-vehiculos en la misma red Docker
+#  Uso:  docker compose up -d
+# =========================================================
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_vehiculos
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: vehiculos
+    # Solo accesible desde el mismo servidor (Workbench entra por túnel SSH)
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ms-vehiculos:
+    image: ${IMAGE:-ms-vehiculos:local}
+    build: .
+    container_name: ms_vehiculos
+    restart: unless-stopped
+    # No parte hasta que MySQL esté listo
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/vehiculos?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD}
+    # Puerto 80 del servidor -> 9004 del contenedor
+    ports:
+      - "80:9004"
+    # Límites de recursos (escalabilidad y gobernanza)
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+volumes:
+  mysql_data:
