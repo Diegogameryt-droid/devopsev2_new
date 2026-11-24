@@ -16,7 +16,7 @@ RUN mvn -B -q package -DskipTests
 # =========================================================
 #  Etapa 2 - RUN: imagen final liviana, solo con el JRE
 # =========================================================
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
 # Usuario sin privilegios (no se corre como root)
