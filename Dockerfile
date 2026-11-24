@@ -1,10 +1,7 @@
-# =========================================================
-#  Etapa 1 - BUILD: compila el proyecto con Maven y Java 21
-# =========================================================
-FROM maven:3.9-eclipse-temurin-21 AS build
+
+FROM maven:3.9-eclipse-temurin-25 AS build
 WORKDIR /app
 
-# Primero solo el pom.xml: así Docker guarda en caché las dependencias
 COPY pom.xml .
 RUN mvn -B -q dependency:go-offline
 
@@ -13,13 +10,9 @@ RUN mvn -B -q dependency:go-offline
 COPY src ./src
 RUN mvn -B -q package -DskipTests
 
-# =========================================================
-#  Etapa 2 - RUN: imagen final liviana, solo con el JRE
-# =========================================================
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
-# Usuario sin privilegios (no se corre como root)
 RUN addgroup -S app && adduser -S app -G app
 
 COPY --from=build /app/target/*.jar app.jar

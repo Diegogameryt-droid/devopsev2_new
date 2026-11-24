@@ -1,6 +1,6 @@
 # ms-vehiculos · Pipeline CI/CD (DOY0101)
 
-Microservicio REST de vehículos (Spring Boot 4, Java 21, MySQL 8) con un pipeline CI/CD en GitHub Actions que compila, prueba, analiza, contenedoriza y despliega automáticamente en AWS EC2.
+Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeline CI/CD en GitHub Actions que compila, prueba, analiza, contenedoriza y despliega automáticamente en AWS EC2.
 
 **Integrantes:** _Nombre 1_ · _Nombre 2_
 
