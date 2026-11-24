@@ -1,5 +1,5 @@
 # Etapa 1 - BUILD: compila con Maven y Java 25
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 WORKDIR /app
 
 COPY pom.xml .
