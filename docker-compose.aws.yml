@@ -1,0 +1,27 @@
+# =========================================================
+#  Ajustes SOLO para la EC2 (AWS). Se usa junto al principal:
+#    docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+#
+#  Envía los logs de cada contenedor directo a CloudWatch Logs
+#  (driver "awslogs"). La EC2 usa su rol IAM (LabInstanceProfile):
+#  no hay claves de AWS en el código.
+# =========================================================
+services:
+
+  mysql:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /ms-vehiculos/mysql
+        awslogs-stream: mysql
+        awslogs-create-group: "true"
+
+  ms-vehiculos:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /ms-vehiculos/app
+        awslogs-stream: ms-vehiculos
+        awslogs-create-group: "true"

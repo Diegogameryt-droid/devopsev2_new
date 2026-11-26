@@ -3,12 +3,12 @@
 #
 #  1) build-test  -> compila y corre las pruebas JUnit (+ cobertura JaCoCo)
 #  2) sonar       -> análisis SonarCloud. Si el Quality Gate falla, se DETIENE
-#  3) docker      -> Hadolint + manifiestos K8s (kubeconform + Trivy config)
+#  3) docker      -> Hadolint + validación de Docker Compose + Trivy config
 #                    + construye imagen + Trivy. Si hay CRITICAL, se DETIENE
 #                    (solo en main) sube la imagen a GitHub Container Registry
-#  4) deploy      -> (solo en main) despliega en Kubernetes (k3s) en la EC2,
+#  4) deploy      -> (solo en main) despliega con Docker Compose en la EC2,
 #                    verifica que responda y envía métricas del pipeline
-#                    (cobertura, tiempo de despliegue) a Prometheus/Grafana
+#                    (cobertura, tiempo de despliegue) a AWS CloudWatch
 #
 #  Cada etapa depende de la anterior ("needs"): si una falla,
 #  las siguientes NO se ejecutan y nada llega a la EC2.
@@ -107,15 +107,15 @@ jobs:
       - name: Revisar Dockerfile (Hadolint)
         run: docker run --rm -i hadolint/hadolint < Dockerfile
 
-      - name: Validar manifiestos de Kubernetes (kubeconform)
+      - name: Validar archivos de Docker Compose
         run: |
-          docker run --rm -v "$PWD/k8s:/k8s:ro" ghcr.io/yannh/kubeconform:latest \
-            -strict -summary -ignore-missing-schemas /k8s
+          DB_PASSWORD=validacion docker compose -f docker-compose.yml -f docker-compose.aws.yml config --quiet
+          echo "✅ docker-compose.yml y docker-compose.aws.yml son válidos"
 
-      - name: Seguridad de manifiestos Kubernetes (Trivy config, falla si hay CRITICAL)
+      - name: Seguridad de configuración (Trivy config, falla si hay CRITICAL)
         run: |
-          docker run --rm -v "$PWD/k8s:/k8s:ro" aquasec/trivy:latest config \
-            --exit-code 1 --severity CRITICAL /k8s
+          docker run --rm -v "$PWD:/repo:ro" aquasec/trivy:latest config \
+            --exit-code 1 --severity CRITICAL /repo
 
       - name: Definir nombre de la imagen
         id: nombre
@@ -148,7 +148,7 @@ jobs:
 
   # ------------------------------------------------------------------
   deploy:
-    name: 4. Despliegue en Kubernetes (EC2)
+    name: 4. Despliegue en EC2 (Docker Compose)
     runs-on: ubuntu-latest
     needs: [build-test, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -159,12 +159,12 @@ jobs:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      IMAGE: ${{ needs.docker.outputs.image }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GHCR_USER: ${{ github.actor }}
       COVERAGE: ${{ needs.build-test.outputs.coverage }}
       TESTS: ${{ needs.build-test.outputs.tests }}
       COMMIT_TS: ${{ github.event.head_commit.timestamp }}
-      RUN_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -177,22 +177,23 @@ jobs:
           chmod 600 ~/.ssh/ec2.pem
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-      - name: Copiar manifiestos de Kubernetes a la EC2
+      - name: Copiar archivos de despliegue a la EC2
         run: |
           ssh -i ~/.ssh/ec2.pem "$EC2_USER@$EC2_HOST" "mkdir -p ~/ms-vehiculos"
-          scp -i ~/.ssh/ec2.pem -r k8s "$EC2_USER@$EC2_HOST:~/ms-vehiculos/"
+          scp -i ~/.ssh/ec2.pem docker-compose.yml docker-compose.aws.yml deploy/deploy.sh \
+            "$EC2_USER@$EC2_HOST:~/ms-vehiculos/"
 
-      - name: Desplegar en Kubernetes
+      - name: Desplegar con Docker Compose
         run: |
           ssh -i ~/.ssh/ec2.pem "$EC2_USER@$EC2_HOST" \
-            "IMAGE_TAG='${GITHUB_SHA::7}' DB_PASSWORD='$DB_PASSWORD' GHCR_USER='$GHCR_USER' GHCR_TOKEN='$GHCR_TOKEN' COVERAGE='$COVERAGE' TESTS='$TESTS' COMMIT_TS='$COMMIT_TS' RUN_NUMBER='$RUN_NUMBER' bash ~/ms-vehiculos/k8s/deploy.sh"
+            "IMAGE='$IMAGE' DB_PASSWORD='$DB_PASSWORD' GHCR_USER='$GHCR_USER' GHCR_TOKEN='$GHCR_TOKEN' COVERAGE='$COVERAGE' TESTS='$TESTS' COMMIT_TS='$COMMIT_TS' bash ~/ms-vehiculos/deploy.sh"
 
       - name: Verificar que el microservicio responde
         run: |
           for i in $(seq 1 20); do
             if curl -fs "http://$EC2_HOST/actuator/health"; then
               echo ""
-              echo "✅ ms-vehiculos desplegado en Kubernetes y sano en http://$EC2_HOST"
+              echo "✅ ms-vehiculos desplegado y sano en http://$EC2_HOST"
               exit 0
             fi
             echo "Esperando que responda... ($i/20)"
