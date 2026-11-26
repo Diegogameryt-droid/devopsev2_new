@@ -3,10 +3,12 @@
 #
 #  1) build-test  -> compila y corre las pruebas JUnit (+ cobertura JaCoCo)
 #  2) sonar       -> análisis SonarCloud. Si el Quality Gate falla, se DETIENE
-#  3) docker      -> Hadolint + construye imagen + Trivy. Si hay CRITICAL, se DETIENE
+#  3) docker      -> Hadolint + manifiestos K8s (kubeconform + Trivy config)
+#                    + construye imagen + Trivy. Si hay CRITICAL, se DETIENE
 #                    (solo en main) sube la imagen a GitHub Container Registry
-#  4) deploy      -> (solo en main) despliega en la EC2 con Docker Compose
-#                    y verifica que el microservicio responda
+#  4) deploy      -> (solo en main) despliega en Kubernetes (k3s) en la EC2,
+#                    verifica que responda y envía métricas del pipeline
+#                    (cobertura, tiempo de despliegue) a Prometheus/Grafana
 #
 #  Cada etapa depende de la anterior ("needs"): si una falla,
 #  las siguientes NO se ejecutan y nada llega a la EC2.
@@ -28,6 +30,9 @@ jobs:
   build-test:
     name: 1. Build y pruebas
     runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.cobertura.outputs.coverage }}
+      tests: ${{ steps.cobertura.outputs.tests }}
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
@@ -43,6 +48,15 @@ jobs:
         run: |
           chmod +x mvnw
           ./mvnw -B verify
+
+      - name: Calcular cobertura y cantidad de pruebas
+        id: cobertura
+        run: |
+          COV=$(awk -F, 'NR>1 {m+=$8; c+=$9} END {t=m+c; if (t>0) printf "%.1f", 100*c/t; else print "0"}' target/site/jacoco/jacoco.csv)
+          TESTS=$(grep -ho 'tests="[0-9]*"' target/surefire-reports/TEST-*.xml | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          echo "coverage=$COV" >> "$GITHUB_OUTPUT"
+          echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
+          echo "### Cobertura de líneas: ${COV}% · Pruebas: ${TESTS}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guardar reporte de pruebas y cobertura
         if: always()
@@ -93,6 +107,16 @@ jobs:
       - name: Revisar Dockerfile (Hadolint)
         run: docker run --rm -i hadolint/hadolint < Dockerfile
 
+      - name: Validar manifiestos de Kubernetes (kubeconform)
+        run: |
+          docker run --rm -v "$PWD/k8s:/k8s:ro" ghcr.io/yannh/kubeconform:latest \
+            -strict -summary -ignore-missing-schemas /k8s
+
+      - name: Seguridad de manifiestos Kubernetes (Trivy config, falla si hay CRITICAL)
+        run: |
+          docker run --rm -v "$PWD/k8s:/k8s:ro" aquasec/trivy:latest config \
+            --exit-code 1 --severity CRITICAL /k8s
+
       - name: Definir nombre de la imagen
         id: nombre
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
@@ -124,9 +148,9 @@ jobs:
 
   # ------------------------------------------------------------------
   deploy:
-    name: 4. Despliegue en EC2
+    name: 4. Despliegue en Kubernetes (EC2)
     runs-on: ubuntu-latest
-    needs: docker
+    needs: [build-test, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -135,45 +159,43 @@ jobs:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      IMAGE: ${{ needs.docker.outputs.image }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GHCR_USER: ${{ github.actor }}
+      COVERAGE: ${{ needs.build-test.outputs.coverage }}
+      TESTS: ${{ needs.build-test.outputs.tests }}
+      COMMIT_TS: ${{ github.event.head_commit.timestamp }}
+      RUN_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Preparar llave SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2.pem
+          echo "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
           chmod 600 ~/.ssh/ec2.pem
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-      - name: Copiar docker-compose.yml a la EC2
+      - name: Copiar manifiestos de Kubernetes a la EC2
         run: |
           ssh -i ~/.ssh/ec2.pem "$EC2_USER@$EC2_HOST" "mkdir -p ~/ms-vehiculos"
-          scp -i ~/.ssh/ec2.pem docker-compose.yml "$EC2_USER@$EC2_HOST:~/ms-vehiculos/docker-compose.yml"
+          scp -i ~/.ssh/ec2.pem -r k8s "$EC2_USER@$EC2_HOST:~/ms-vehiculos/"
 
-      - name: Desplegar con Docker Compose
+      - name: Desplegar en Kubernetes
         run: |
-          ssh -i ~/.ssh/ec2.pem "$EC2_USER@$EC2_HOST" bash -s <<EOF
-            set -e
-            cd ~/ms-vehiculos
-            printf 'IMAGE=%s\nDB_PASSWORD=%s\n' '$IMAGE' '$DB_PASSWORD' > .env
-            echo '$GHCR_TOKEN' | docker login ghcr.io -u '$GHCR_USER' --password-stdin
-            docker compose pull ms-vehiculos
-            docker compose up -d --no-build
-            docker image prune -f
-          EOF
+          ssh -i ~/.ssh/ec2.pem "$EC2_USER@$EC2_HOST" \
+            "IMAGE_TAG='${GITHUB_SHA::7}' DB_PASSWORD='$DB_PASSWORD' GHCR_USER='$GHCR_USER' GHCR_TOKEN='$GHCR_TOKEN' COVERAGE='$COVERAGE' TESTS='$TESTS' COMMIT_TS='$COMMIT_TS' RUN_NUMBER='$RUN_NUMBER' bash ~/ms-vehiculos/k8s/deploy.sh"
 
       - name: Verificar que el microservicio responde
         run: |
           for i in $(seq 1 20); do
             if curl -fs "http://$EC2_HOST/actuator/health"; then
               echo ""
-              echo "✅ ms-vehiculos desplegado y sano en http://$EC2_HOST"
+              echo "✅ ms-vehiculos desplegado en Kubernetes y sano en http://$EC2_HOST"
               exit 0
             fi
-            echo "Esperando que arranque... ($i/20)"
+            echo "Esperando que responda... ($i/20)"
             sleep 6
           done
           echo "❌ El microservicio no respondió"
