@@ -63,6 +63,8 @@ El Quality Gate bloqueó el pipeline por la nota de seguridad. Se corrigió el h
 ![Hallazgos detectados](docs/img/sonarcloud-issues.png)
 ![Hallazgos revisados y aceptados](docs/img/sonarcloud-issues-aceptados.png)
 ![Hallazgo aceptado en un PR posterior](docs/img/sonarcloud-issue-aceptado-pr14.png)
+![Hallazgo aceptado en el PR de CloudWatch](docs/img/sonarcloud-issue-aceptado-pr18.png)
+![Security Hotspots revisados al 100%](docs/img/sonarcloud-hotspots-revisados.png)
 ![SonarCloud aprobado](docs/img/sonarcloud-passed.png)
 
 ## 4. Detención ante errores críticos (IE6)
