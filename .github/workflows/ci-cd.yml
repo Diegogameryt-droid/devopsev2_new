@@ -52,7 +52,7 @@ jobs:
       - name: Calcular cobertura y cantidad de pruebas
         id: cobertura
         run: |
-          COV=$(awk -F, 'NR>1 {m+=$8; c+=$9} END {printf "%.1f", (m+c)>0 ? 100*c/(m+c) : 0}' target/site/jacoco/jacoco.csv)
+          COV=$(awk -F, 'NR>1 {m+=$8; c+=$9} END {t=m+c; if (t>0) printf "%.1f", 100*c/t; else print "0"}' target/site/jacoco/jacoco.csv)
           TESTS=$(grep -ho 'tests="[0-9]*"' target/surefire-reports/TEST-*.xml | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
           echo "coverage=$COV" >> "$GITHUB_OUTPUT"
           echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
