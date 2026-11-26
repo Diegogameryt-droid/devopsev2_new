@@ -1,6 +1,6 @@
 # ms-vehiculos · DevOps (DOY0101)
 
-Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeline CI/CD en GitHub Actions que **prueba, analiza, valida políticas de seguridad, contenedoriza y despliega automáticamente en Kubernetes (k3s) sobre AWS EC2**, con **monitoreo y observabilidad** en Prometheus, Loki y Grafana.
+Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeline CI/CD en GitHub Actions que **prueba, analiza, valida políticas de seguridad, contenedoriza y despliega automáticamente con Docker Compose en AWS EC2**, con **monitoreo, alarmas y dashboard en AWS CloudWatch**.
 
 **Integrantes:** _Nombre 1_ · _Nombre 2_
 
@@ -15,20 +15,20 @@ Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeli
                    GitHub Actions
    1. Build y pruebas ─ JUnit 5 + Mockito + JaCoCo (cobertura)
    2. SonarCloud ────── Quality Gate (seguridad A, cobertura ≥ 80%)
-   3. Seguridad ─────── Hadolint · kubeconform · Trivy config (K8s) · Trivy imagen
+   3. Seguridad ─────── Hadolint · docker compose config · Trivy config · Trivy imagen
                         └─ (solo main) imagen → GHCR, etiquetada con el SHA
-   4. Despliegue ────── SSH → k3s: kubectl apply + rollout
-                        └─ envía métricas del pipeline al Pushgateway
+   4. Despliegue ────── SSH → docker compose pull + up (espera "healthy")
+                        └─ envía métricas del pipeline a CloudWatch
                           │
                           ▼
-   AWS EC2 (t3.medium) · Kubernetes k3s
-   ┌───────────────────────────────────────────────────────────┐
-   │ ns vehiculos                     ns monitoring            │
-   │  ms-vehiculos (Deployment+HPA)    Prometheus ◀─ métricas  │
-   │  mysql (Deployment + volumen)     Loki ◀─ Alloy (logs)    │
-   │  Ingress Traefik :80 ──▶ /        Pushgateway ◀─ pipeline │
-   │                     └──▶ /grafana Grafana (dashboard)     │
-   └───────────────────────────────────────────────────────────┘
+   AWS EC2 · Docker Compose                       AWS CloudWatch
+   ┌──────────────────────────────────┐        ┌──────────────────────────────┐
+   │ ms-vehiculos :80 → 9004 (health) │─logs──▶│ Logs /ms-vehiculos/app       │
+   │ mysql 8 (volumen, solo local)    │─logs──▶│ Logs /ms-vehiculos/mysql     │
+   │ CloudWatch Agent (mem, disco)    │─mét.──▶│ Métricas EC2 · App · Pipeline│
+   └──────────────────────────────────┘        │ 4 alarmas ─▶ SNS ─▶ correo   │
+                                               │ Dashboard ms-vehiculos-devops│
+                                               └──────────────────────────────┘
 ```
 
 ## 2. Etapas del pipeline
@@ -37,21 +37,33 @@ Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeli
 |---|---|---|---|
 | 1 | Build y pruebas | Maven, JUnit 5, Mockito, JaCoCo | Se detiene: no se analiza ni se construye imagen |
 | 2 | Calidad de código | SonarCloud (Quality Gate) | Se detiene: no se construye imagen |
-| 3 | Seguridad y contenedor | Hadolint, kubeconform, Trivy (config K8s e imagen) | Se detiene si hay errores o vulnerabilidades CRITICAL |
-| 4 | Despliegue | SSH + kubectl en k3s | Falla si el rollout no termina o `/actuator/health` no responde |
+| 3 | Seguridad y contenedor | Hadolint, `docker compose config`, Trivy (configuración e imagen) | Se detiene si hay errores o vulnerabilidades CRITICAL |
+| 4 | Despliegue | SSH + Docker Compose en EC2 | Falla si el contenedor no queda *healthy* o `/actuator/health` no responde |
+
+![Pipeline en verde](docs/img/pipeline-verde.png)
 
 ## 3. Políticas de cumplimiento (IE5)
 
 | Política | Dónde se aplica | Evidencia |
 |---|---|---|
-| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | _captura_ |
-| Buenas prácticas de Dockerfile (Hadolint) | Etapa 3 | _captura_ |
-| Manifiestos K8s válidos (kubeconform) y sin configuraciones CRITICAL (Trivy config) | Etapa 3 | _captura_ |
-| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | _captura_ |
-| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | _captura_ |
-| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | _captura_ |
-| Contenedores sin root, sin escalamiento de privilegios, con límites de CPU/memoria | Manifiestos K8s | `k8s/*.yaml` |
-| Secretos fuera del código (GitHub Secrets → Kubernetes Secrets) | Pipeline + K8s | `k8s/deploy.sh` |
+| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | [ver](docs/img/sonarcloud-passed.png) |
+| Buenas prácticas de Dockerfile (Hadolint) y archivos Compose válidos | Etapa 3 | [ver](docs/img/pipeline-verde.png) |
+| Configuración sin problemas CRITICAL (Trivy config) | Etapa 3 | [ver](docs/img/pipeline-verde.png) |
+| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | [ver](docs/img/pr-vulnerable-trivy.png) |
+| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | [ver](docs/img/dependabot-prs.png) |
+| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | [ver](docs/img/branch-protection-1.png) · [ver](docs/img/branch-protection-2.png) |
+| Contenedor sin root, con healthcheck y límites de CPU/memoria | Dockerfile + Compose | `Dockerfile`, `docker-compose.yml` |
+| Secretos fuera del código (GitHub Secrets → `.env` en la EC2; rol IAM para AWS) | Pipeline + EC2 | `deploy/deploy.sh` |
+
+### Revisión de hallazgos de seguridad
+
+El Quality Gate bloqueó el pipeline por la nota de seguridad. Se corrigió el hallazgo de severidad alta (acción de terceros sin SHA fijo, reemplazada por un comando `docker login`) y se aceptaron con justificación los de uso de `http://` (EC2 del Learner Lab sin dominio ni certificado TLS).
+
+![Quality Gate fallido por seguridad](docs/img/sonarcloud-gate-fallido.png)
+![Hallazgos detectados](docs/img/sonarcloud-issues.png)
+![Hallazgos revisados y aceptados](docs/img/sonarcloud-issues-aceptados.png)
+![Hallazgo aceptado en un PR posterior](docs/img/sonarcloud-issue-aceptado-pr14.png)
+![SonarCloud aprobado](docs/img/sonarcloud-passed.png)
 
 ## 4. Detención ante errores críticos (IE6)
 
@@ -60,36 +72,63 @@ Prueba realizada: PR #11 agregó `commons-collections:3.2.1` (vulnerabilidad CRI
 - Snyk también marcó el PR como fallido.
 - La protección de `main` **bloqueó el merge**.
 
-_(capturas)_
+![Pipeline detenido en la etapa 3](docs/img/pr-vulnerable-pipeline-detenido.png)
+![Trivy detecta la vulnerabilidad CRITICAL](docs/img/pr-vulnerable-trivy.png)
+![Merge bloqueado por la protección de main](docs/img/pr-vulnerable-merge-bloqueado.png)
 
-## 5. Kubernetes (IE2)
+**Protección de la rama `main`:**
 
-- **Clúster:** k3s en AWS EC2 (t3.medium), Ingress Traefik en el puerto 80.
-- **Manifiestos:** `k8s/` — namespace, MySQL con volumen persistente, microservicio con probes de salud, `RollingUpdate` sin cortes (`maxUnavailable: 0`), HPA de 1 a 2 réplicas por CPU, y `ServiceMonitor` para Prometheus.
+![Ruleset proteger-main](docs/img/branch-protection-1.png)
+![Checks obligatorios](docs/img/branch-protection-2.png)
+
+## 5. Despliegue orquestado en la nube (IE2)
+
+- **Entorno:** AWS EC2 (AWS Academy Learner Lab) con **Docker Compose**.
+- **Servicios:** `ms-vehiculos` (puerto 80 → 9004) y `mysql` (volumen persistente, solo accesible desde la EC2; MySQL Workbench entra por túnel SSH).
+- **Orquestación:** `depends_on` con `service_healthy` (la app espera a MySQL), healthchecks, `restart: unless-stopped` y límites de CPU/memoria.
+- **Integración con monitoreo:** `docker-compose.aws.yml` envía los logs de cada contenedor a CloudWatch Logs (driver `awslogs`), usando el rol IAM de la EC2 (sin claves en el código).
 - **Trazabilidad:** cada despliegue usa la imagen `ghcr.io/.../devopsev2_new:<sha-del-commit>`.
 
-## 6. Monitoreo y observabilidad (IE1)
+![Contenedores en la EC2](docs/img/docker-compose-ps.png)
+![API respondiendo](docs/img/api-respuesta.png)
+![Swagger](docs/img/swagger.png)
+
+## 6. Monitoreo y alarmas (IE1)
 
 | Necesidad | Herramienta | Qué muestra |
 |---|---|---|
-| Métricas de la app | Micrometer → `/actuator/prometheus` → Prometheus | Peticiones, códigos HTTP, errores, memoria JVM, CPU del proceso |
-| Métricas de infraestructura | node-exporter, cAdvisor, kube-state-metrics | CPU/RAM del servidor y de cada contenedor, réplicas disponibles |
-| Logs | Alloy → Loki | Logs de todos los pods, filtrables por app y por errores |
-| Métricas del pipeline | GitHub Actions → Pushgateway | Cobertura, cantidad de pruebas, tiempo de despliegue, lead time |
-| Visualización | Grafana (`http://IP/grafana`) | Dashboard **"ms-vehiculos · DevOps"** |
+| Logs | Driver `awslogs` → CloudWatch Logs | Logs de la app y de MySQL (`/ms-vehiculos/app`, `/ms-vehiculos/mysql`) |
+| Errores y tráfico | Filtros de métricas sobre el access log de Tomcat | Peticiones HTTP, errores 4xx, errores 5xx, líneas ERROR/Exception |
+| Recursos | Métricas de EC2 + CloudWatch Agent | CPU, memoria, disco y swap |
+| Disponibilidad | Healthcheck de Docker + verificación del pipeline | Estado `healthy` y respuesta de `/actuator/health` |
+| Métricas del pipeline | `aws cloudwatch put-metric-data` desde el despliegue | Cobertura, cantidad de pruebas, tiempo de despliegue, lead time |
 
-Instalación del stack (una vez, en la EC2): `bash monitoring/install.sh`
+**Alarmas (aviso por correo con SNS):**
+
+| Alarma | Condición |
+|---|---|
+| `ms-vehiculos-cpu-alta` | CPU de la EC2 > 80% durante 5 minutos |
+| `ms-vehiculos-memoria-alta` | Memoria de la EC2 > 85% |
+| `ms-vehiculos-errores-5xx` | Al menos 1 error 5xx en 1 minuto |
+| `ms-vehiculos-errores-4xx` | Más de 20 errores 4xx en 1 minuto |
+
+Configuración (una vez, en la EC2): `bash monitoring/cloudwatch-setup.sh correo@duocuc.cl`
+
+![Alarmas en CloudWatch](docs/img/cloudwatch-alarmas.png)
+![Correo de alarma](docs/img/cloudwatch-correo-alarma.png)
+![Logs en CloudWatch](docs/img/cloudwatch-logs.png)
 
 ## 7. Dashboard (IE3)
 
-Dashboard **"ms-vehiculos · DevOps"** (`monitoring/dashboard-configmap.yaml`, cargado automáticamente):
+Dashboard **`ms-vehiculos-devops`** en CloudWatch (`monitoring/cloudwatch-dashboard.json`):
 
-- **Estado y pipeline:** estado del servicio, réplicas, **cobertura de pruebas**, pruebas ejecutadas, **tiempo de despliegue**, lead time.
-- **Recursos:** **CPU y memoria** por contenedor, uso del servidor, memoria JVM.
-- **Tráfico y errores:** peticiones por código HTTP, **errores 4xx y 5xx**.
-- **Logs:** logs del microservicio y logs con errores.
+- **Estado de las alarmas.**
+- **Pipeline CI/CD:** **cobertura de pruebas**, pruebas ejecutadas, **tiempo de despliegue**, lead time.
+- **Recursos:** **CPU, memoria** y disco de la EC2.
+- **Tráfico y errores:** peticiones, **errores 4xx y 5xx**, errores en logs.
+- **Logs:** logs con errores y últimos logs del microservicio.
 
-_(captura del dashboard)_
+![Dashboard de CloudWatch](docs/img/cloudwatch-dashboard.png)
 
 ## 8. Cómo ejecutar localmente
 
@@ -102,14 +141,37 @@ docker compose up -d --build
 
 ## 9. Uso de Inteligencia Artificial
 
-_(Declarar qué herramientas de IA se usaron y para qué, según https://bibliotecas.duoc.cl/ia)_
+Se utilizó **Claude (Anthropic)** como herramienta de apoyo, de acuerdo con las orientaciones de https://bibliotecas.duoc.cl/ia, para:
+
+- Configurar el pipeline de GitHub Actions (etapas, Quality Gate, Hadolint, Trivy).
+- Preparar la configuración de Docker Compose para AWS y del monitoreo con CloudWatch (agente, filtros de métricas, alarmas y dashboard).
+- Diagnosticar y resolver errores durante el despliegue (conexión SSH, memoria de la EC2, hallazgos de SonarCloud).
+- Organizar las evidencias y la estructura de este README.
 
 ## 10. Conclusiones y reflexiones individuales
 
 > ⚠️ Esta sección la escribe cada integrante **sin apoyo de IA** (requisito de la evaluación).
 
-**Justificación técnica de las decisiones:**
+### Justificación técnica de las decisiones
 
-**Reflexión de _Nombre 1_:**
+**¿Por qué Docker Compose en AWS EC2?**
+_(Escribir)_
 
-**Reflexión de _Nombre 2_:**
+**SonarCloud:**
+SonarCloud realiza un análisis estático del código fuente que uno escribe. Detecta errores lógicos y vulnerabilidades de seguridad en el código propio.
+
+**Trivy:**
+Trivy es un escáner de seguridad que detecta vulnerabilidades y malas configuraciones en imágenes de contenedores, sistemas de archivos, repositorios Git y manifiestos de Kubernetes.
+
+**¿Por qué el despliegue ocurre solo al hacer merge a `main`?**
+El despliegue ocurre solo al hacer merge a `main` porque los Pull Requests (PR) sirven para revisar y validar código sin alterar producción, mientras que `main` suele representar el estado estable o listo para liberar.
+
+**CloudWatch (dashboard y alarmas):**
+_(Escribir)_
+
+### Reflexión de _Diego_
+
+Lo que más me costó fue hacer que GitHub Actions realizara correctamente los Pull Requests a causa de un error mínimo en los secretos, entre otras cosas.
+
+### Reflexión de _Nombre 2_
+

@@ -15,18 +15,27 @@ spring:
 
 server:
   port: ${SERVER_PORT:9004}
+  # EV3: cada petición HTTP queda en los logs (stdout) con su código de estado.
+  # CloudWatch Logs cuenta los 4xx/5xx a partir de estas líneas.
+  tomcat:
+    accesslog:
+      enabled: true
+      directory: /dev
+      prefix: stdout
+      suffix: ""
+      file-date-format: ""
+      rotate: false
+      buffered: false
+      pattern: '%h %l %u %t "%r" %s %b'
 
-# Actuator: salud (probes de Kubernetes) y métricas para Prometheus (EV3)
+# Actuator: salud (probes de Kubernetes)
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info
   endpoint:
     health:
       show-details: never
       probes:
         enabled: true
-  metrics:
-    tags:
-      application: ms-vehiculos
