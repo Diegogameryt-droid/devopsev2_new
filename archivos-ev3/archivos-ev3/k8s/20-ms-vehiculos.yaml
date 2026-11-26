@@ -1,0 +1,165 @@
+# =====================================================================
+#  Microservicio ms-vehiculos
+#  - Deployment con probes de salud (liveness/readiness de Spring Boot)
+#  - Service + Ingress (Traefik de k3s, puerto 80 de la EC2)
+#  - HPA: escala de 1 a 2 réplicas si la CPU pasa del 70%
+#  La etiqueta de la imagen (TAG_PLACEHOLDER) la reemplaza el pipeline
+#  con el SHA del commit, para trazabilidad.
+# =====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ms-vehiculos
+  namespace: vehiculos
+  labels:
+    app: ms-vehiculos
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0     # no se corta el servicio durante un despliegue
+  selector:
+    matchLabels:
+      app: ms-vehiculos
+  template:
+    metadata:
+      labels:
+        app: ms-vehiculos
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: ms-vehiculos
+          image: ghcr.io/diegogameryt-droid/devopsev2_new:TAG_PLACEHOLDER
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9004
+              name: http
+          env:
+            - name: DB_URL
+              value: jdbc:mysql://mysql:3306/vehiculos?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+            - name: DB_USERNAME
+              value: root
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: DB_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+              ephemeral-storage: 512Mi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36       # hasta 3 minutos para arrancar
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp          # Tomcat necesita escribir archivos temporales
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ms-vehiculos
+  namespace: vehiculos
+  labels:
+    app: ms-vehiculos
+spec:
+  type: ClusterIP
+  selector:
+    app: ms-vehiculos
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ms-vehiculos
+  namespace: vehiculos
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ms-vehiculos
+                port:
+                  name: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ms-vehiculos
+  namespace: vehiculos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ms-vehiculos
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# Prometheus lee las métricas del microservicio cada 15 segundos
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ms-vehiculos
+  namespace: vehiculos
+  labels:
+    app: ms-vehiculos
+spec:
+  selector:
+    matchLabels:
+      app: ms-vehiculos
+  namespaceSelector:
+    matchNames: ["vehiculos"]
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

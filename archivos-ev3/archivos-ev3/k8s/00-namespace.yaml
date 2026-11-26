@@ -1,0 +1,7 @@
+# Espacio de nombres propio para la aplicación (separa app y monitoreo)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vehiculos
+  labels:
+    app.kubernetes.io/part-of: ms-vehiculos
