@@ -1,0 +1,84 @@
+# =====================================================================
+#  kube-prometheus-stack: Prometheus + Grafana + node-exporter +
+#  kube-state-metrics. Ajustado para una sola EC2 (t3.medium, 4 GB).
+# =====================================================================
+
+# Sin Alertmanager (ahorra memoria; las alertas se ven en Grafana)
+alertmanager:
+  enabled: false
+
+# Componentes que k3s no expone por separado (evita objetivos "caídos")
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 3d
+    scrapeInterval: 15s
+    # Lee TODOS los ServiceMonitor del clúster (app, pushgateway, etc.)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        memory: 1Gi
+
+grafana:
+  fullnameOverride: grafana
+  # La clave del admin se entrega en install.sh (no queda en el repo)
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/grafana/"
+      serve_from_sub_path: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+  # Fuente de datos para los logs
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.monitoring.svc.cluster.local:3100
+  # Carga automática de dashboards desde ConfigMaps con la etiqueta grafana_dashboard
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
