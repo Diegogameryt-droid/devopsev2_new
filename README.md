@@ -44,14 +44,24 @@ Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeli
 
 | Política | Dónde se aplica | Evidencia |
 |---|---|---|
-| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | _captura_ |
-| Buenas prácticas de Dockerfile (Hadolint) | Etapa 3 | _captura_ |
-| Manifiestos K8s válidos (kubeconform) y sin configuraciones CRITICAL (Trivy config) | Etapa 3 | _captura_ |
-| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | _captura_ |
-| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | _captura_ |
-| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | _captura_ |
+| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | [ver](docs/img/sonarcloud-passed.png) |
+| Buenas prácticas de Dockerfile (Hadolint) | Etapa 3 | [ver](docs/img/pipeline-validacion-k8s.png) |
+| Manifiestos K8s válidos (kubeconform) y sin configuraciones CRITICAL (Trivy config) | Etapa 3 | [ver](docs/img/pipeline-validacion-k8s.png) |
+| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | [ver](docs/img/pr-vulnerable-trivy.png) |
+| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | [ver](docs/img/dependabot-prs.png) |
+| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | [ver](docs/img/branch-protection-1.png) · [ver](docs/img/branch-protection-2.png) |
 | Contenedores sin root, sin escalamiento de privilegios, con límites de CPU/memoria | Manifiestos K8s | `k8s/*.yaml` |
 | Secretos fuera del código (GitHub Secrets → Kubernetes Secrets) | Pipeline + K8s | `k8s/deploy.sh` |
+
+### Revisión de hallazgos de seguridad
+
+El Quality Gate bloqueó el pipeline por la nota de seguridad. Se corrigió el hallazgo de severidad alta (acción de terceros sin SHA fijo, reemplazada por un comando `docker login`) y se aceptaron con justificación los de uso de `http://` (EC2 del Learner Lab sin dominio ni certificado TLS).
+
+![Quality Gate fallido por seguridad](docs/img/sonarcloud-gate-fallido.png)
+![Hallazgos detectados](docs/img/sonarcloud-issues.png)
+![Hallazgos revisados y aceptados](docs/img/sonarcloud-issues-aceptados.png)
+![Hallazgo aceptado en el PR de la EV3](docs/img/sonarcloud-issue-aceptado-pr14.png)
+![SonarCloud aprobado](docs/img/sonarcloud-passed.png)
 
 ## 4. Detención ante errores críticos (IE6)
 
@@ -60,13 +70,27 @@ Prueba realizada: PR #11 agregó `commons-collections:3.2.1` (vulnerabilidad CRI
 - Snyk también marcó el PR como fallido.
 - La protección de `main` **bloqueó el merge**.
 
-_(capturas)_
+![Pipeline detenido en la etapa 3](docs/img/pr-vulnerable-pipeline-detenido.png)
+![Trivy detecta la vulnerabilidad CRITICAL](docs/img/pr-vulnerable-trivy.png)
+![Merge bloqueado por la protección de main](docs/img/pr-vulnerable-merge-bloqueado.png)
+
+**Protección de la rama `main`:**
+
+![Ruleset proteger-main](docs/img/branch-protection-1.png)
+![Checks obligatorios](docs/img/branch-protection-2.png)
 
 ## 5. Kubernetes (IE2)
 
 - **Clúster:** k3s en AWS EC2 (t3.medium), Ingress Traefik en el puerto 80.
 - **Manifiestos:** `k8s/` — namespace, MySQL con volumen persistente, microservicio con probes de salud, `RollingUpdate` sin cortes (`maxUnavailable: 0`), HPA de 1 a 2 réplicas por CPU, y `ServiceMonitor` para Prometheus.
 - **Trazabilidad:** cada despliegue usa la imagen `ghcr.io/.../devopsev2_new:<sha-del-commit>`.
+
+![k3s instalado y nodo Ready](docs/img/k3s-nodo-ready.png)
+![Validación de manifiestos en el pipeline](docs/img/pipeline-validacion-k8s.png)
+![Despliegue en Kubernetes desde el pipeline](docs/img/pipeline-despliegue-kubernetes.png)
+![Pods, servicios, ingress y HPA](docs/img/kubectl-vehiculos.png)
+![API respondiendo desde Kubernetes](docs/img/api-respuesta.png)
+![Swagger](docs/img/swagger.png)
 
 ## 6. Monitoreo y observabilidad (IE1)
 
@@ -80,6 +104,9 @@ _(capturas)_
 
 Instalación del stack (una vez, en la EC2): `bash monitoring/install.sh`
 
+![Pods del monitoreo](docs/img/monitoring-pods.png)
+![Acceso a Grafana](docs/img/grafana-login.png)
+
 ## 7. Dashboard (IE3)
 
 Dashboard **"ms-vehiculos · DevOps"** (`monitoring/dashboard-configmap.yaml`, cargado automáticamente):
@@ -89,7 +116,9 @@ Dashboard **"ms-vehiculos · DevOps"** (`monitoring/dashboard-configmap.yaml`, c
 - **Tráfico y errores:** peticiones por código HTTP, **errores 4xx y 5xx**.
 - **Logs:** logs del microservicio y logs con errores.
 
-_(captura del dashboard)_
+![Dashboard: estado, pipeline y recursos](docs/img/grafana-dashboard.png)
+![Dashboard: tráfico y errores](docs/img/grafana-trafico-errores.png)
+![Dashboard: logs](docs/img/grafana-logs.png)
 
 ## 8. Cómo ejecutar localmente
 
