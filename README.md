@@ -44,15 +44,14 @@ Microservicio REST de vehículos (Spring Boot 4, Java 25, MySQL 8) con un pipeli
 
 | Política | Dónde se aplica | Evidencia |
 |---|---|---|
-| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | _captura_ |
-| Buenas prácticas de Dockerfile (Hadolint) | Etapa 3 | _captura_ |
-| Manifiestos K8s válidos (kubeconform) y sin configuraciones CRITICAL (Trivy config) | Etapa 3 | _captura_ |
-| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | _captura_ |
-| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | _captura_ |
-| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | _captura_ |
+| Quality Gate de SonarCloud (seguridad A, cobertura ≥ 80%, duplicación ≤ 3%) | Etapa 2 | [ver](docs/img/sonarcloud-passed.png) |
+| Buenas prácticas de Dockerfile (Hadolint) | Etapa 3 | [ver](docs/img/pipeline-validacion-k8s.png) |
+| Manifiestos K8s válidos (kubeconform) y sin configuraciones CRITICAL (Trivy config) | Etapa 3 | [ver](docs/img/pipeline-validacion-k8s.png) |
+| Imagen sin vulnerabilidades CRITICAL con parche disponible (Trivy) | Etapa 3 | [ver](docs/img/pr-vulnerable-trivy.png) |
+| Dependencias revisadas semanalmente (Dependabot) y análisis de Snyk en los PR | GitHub | [ver](docs/img/dependabot-prs.png) |
+| Rama `main` protegida: PR obligatorio, 1 aprobación, checks 1–3 obligatorios, sin force push | GitHub Rulesets | [ver](docs/img/branch-protection-1.png) · [ver](docs/img/branch-protection-2.png) |
 | Contenedores sin root, sin escalamiento de privilegios, con límites de CPU/memoria | Manifiestos K8s | `k8s/*.yaml` |
 | Secretos fuera del código (GitHub Secrets → Kubernetes Secrets) | Pipeline + K8s | `k8s/deploy.sh` |
-
 ## 4. Detención ante errores críticos (IE6)
 
 Prueba realizada: PR #11 agregó `commons-collections:3.2.1` (vulnerabilidad CRITICAL conocida).
@@ -102,14 +101,24 @@ docker compose up -d --build
 
 ## 9. Uso de Inteligencia Artificial
 
-_(Declarar qué herramientas de IA se usaron y para qué, según https://bibliotecas.duoc.cl/ia)_
+Se utilizó **Claude (Anthropic)** como herramienta de apoyo, de acuerdo con las orientaciones de https://bibliotecas.duoc.cl/ia, para:
+
+- Configurar el pipeline de GitHub Actions (etapas, Quality Gate, Hadolint, Trivy, kubeconform).
+- Redactar los manifiestos de Kubernetes y la configuración del stack de monitoreo (Prometheus, Grafana, Loki, Alloy y Pushgateway).
+- Diagnosticar y resolver errores durante el despliegue (conexión SSH, memoria de la EC2, hallazgos de SonarCloud).
+- Organizar las evidencias y la estructura de este README.
+
+¿Por qué Kubernetes (k3s) y no Docker Compose?
+La decisión de usar Kubernetes (k3s) en vez de Docker Compose se debe a la necesidad de alta disponibilidad, escalado en múltiples servidores y despliegues sin caídas, manteniendo un bajo consumo de recursos.
+
+Con respecto a SonarCloud, este realiza un análisis estático del código fuente que uno escribe. Detecta errores lógicos y vulnerabilidades de seguridad en el código propio.
+
+Trivy es un escáner de seguridad  que detecta vulnerabilidades y malas configuraciones en imágenes de contenedores, sistemas de archivos, repositorios Git y manifiestos de Kubernetes
+
+El despliegue ocurre solo al hacer merge a main porque los Pull Requests (PR) sirven para revisar y validar código sin alterar producción, mientras que main suele representar el estado estable o listo para liberar.
+
+Un dashboard de Grafana sirve para visualizar, monitorear y analizar datos de distintos sistemas en tiempo real desde un único panel interactivo
 
 ## 10. Conclusiones y reflexiones individuales
-
-> ⚠️ Esta sección la escribe cada integrante **sin apoyo de IA** (requisito de la evaluación).
-
-**Justificación técnica de las decisiones:**
-
-**Reflexión de _Nombre 1_:**
-
-**Reflexión de _Nombre 2_:**
+Este cuenta x2
+Lo que más me costó fue hacer que Actions de Github realizara correctamente los pullrequest a causa de un error mínimo en los secretos, entre otras cosas
