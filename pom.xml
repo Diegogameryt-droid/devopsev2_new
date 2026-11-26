@@ -33,7 +33,7 @@
         <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
         <!-- SonarCloud: cambia estos dos valores por los de tu proyecto en sonarcloud.io -->
         <sonar.organization>diegogameryt-droid</sonar.organization>
-        <sonar.projectKey>Diegogameryt-droid_ms-veh-culos_Evaluacion2</sonar.projectKey>
+        <sonar.projectKey>Diegogameryt-droid_devopsev2_new</sonar.projectKey>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
     </properties>
 
