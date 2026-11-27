@@ -152,12 +152,10 @@ Se utilizó **Claude (Anthropic)** como herramienta de apoyo, de acuerdo con las
 
 ## 10. Conclusiones y reflexiones individuales
 
-> ⚠️ Esta sección la escribe cada integrante **sin apoyo de IA** (requisito de la evaluación).
-
 ### Justificación técnica de las decisiones
 
 **¿Por qué Docker Compose en AWS EC2?**
-_(Escribir)_
+Docker Compose nos permite definir, conectar y levantar varios contenedores.
 
 **SonarCloud:**
 SonarCloud realiza un análisis estático del código fuente que uno escribe. Detecta errores lógicos y vulnerabilidades de seguridad en el código propio.
@@ -169,11 +167,9 @@ Trivy es un escáner de seguridad que detecta vulnerabilidades y malas configura
 El despliegue ocurre solo al hacer merge a `main` porque los Pull Requests (PR) sirven para revisar y validar código sin alterar producción, mientras que `main` suele representar el estado estable o listo para liberar.
 
 **CloudWatch (dashboard y alarmas):**
-_(Escribir)_
+Configuramos las alarmas de CloudWatch para poder monitorear la infraestructura en tiempo real y así detectar fallos y optimizar el rendimiento 
 
-### Reflexión de _Diego_
 
-Lo que más me costó fue hacer que GitHub Actions realizara correctamente los Pull Requests a causa de un error mínimo en los secretos, entre otras cosas.
-
+Lo que más nos costó fue hacer que GitHub Actions realizara correctamente los Pull Requests a causa de un error mínimo en los secretos, entre otras cosas.
 ### Reflexión de _Nombre 2_
 
